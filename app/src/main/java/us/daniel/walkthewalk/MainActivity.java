@@ -1,42 +1,34 @@
 package us.daniel.walkthewalk;
 
-import android.content.Context;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.hardware.SensorManager;
+
+import android.content.Intent;
+
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.util.Log;
 
-public class MainActivity extends AppCompatActivity implements SensorEventListener {
 
-    private SensorManager mSensorManager;
 
-    private Sensor mSensor;
+public class MainActivity extends AppCompatActivity {
 
-    private int numberSteps;
+    private static final String DEBUG_TAG = "MAIN_ACTIVITY";
+
+    private Intent pedometerService;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        numberSteps = 0;
-
-        mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-        mSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR);
+        pedometerService = new Intent(getApplicationContext(), PedometerService.class);
+        startService(pedometerService);
     }
 
     @Override
-    public void onSensorChanged(SensorEvent event) {
-
-        if(event.sensor.getType() == Sensor.TYPE_STEP_DETECTOR) { /* Detected a step! */
-            numberSteps++;
-        }
-    }
-
-    @Override
-    public void onAccuracyChanged(Sensor sensor, int accuracy) {
-        /* TODO: Maybe change amount of measurements or switch to another sensor */
+    protected void onDestroy() {
+        stopService(pedometerService);
+        Log.i(DEBUG_TAG, "Destroying Pedometer Service");
+        super.onDestroy();
     }
 }

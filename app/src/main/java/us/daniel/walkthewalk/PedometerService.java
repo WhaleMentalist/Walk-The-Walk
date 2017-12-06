@@ -14,6 +14,7 @@ import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
 
 import android.support.annotation.Nullable;
+import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -33,20 +34,28 @@ public class PedometerService extends Service {
     /** Strictly for debugging logs */
     private static final String DEBUG_TAG = "PEDOMETER_SERVICE";
 
+    /** Will be used to subtract off magnitude calculated from sensor data */
     private static final float GRAVITY = 9.807f;
 
+    /** The period between sensor readings in microseconds */
     private static final int SAMPLE_PERIOD = 20000;
 
+    /** Amount of sensor data samples to read*/
     private static final int SAMPLE_SIZE = 50;
 
+    /** An arbitrary threshold to detect foot step*/
     private static final double THRESHOLD = 5.2;
 
+    /** Handler thread for sensor reading*/
     private HandlerThread sensorThread;
 
+    /** Handler responds to sensor events */
     private Handler sensorHandler;
 
+    /** Allows configuration and retrieval of sensors on system */
     private SensorManager sensorManager;
 
+    /** The accelerometer sensor */
     private Sensor accelerometer;
 
     /** Sample data read from the sensor*/
@@ -59,7 +68,7 @@ public class PedometerService extends Service {
     private ArrayBlockingQueue<Double> acceleration;
 
     public PedometerService() {
-        super(); /** Help debug the service running */
+        super();
         Log.i(DEBUG_TAG, "CONSTRUCTION");
     }
 
@@ -70,6 +79,7 @@ public class PedometerService extends Service {
         acceleration = new ArrayBlockingQueue<>(2 * SAMPLE_SIZE);
         data =  new ArrayList<>();
 
+        /** Create thread for sensor reading */
         sensorThread = new HandlerThread("ACCELEROMETER_THREAD", Thread.MAX_PRIORITY);
         sensorThread.start();
 
@@ -86,15 +96,19 @@ public class PedometerService extends Service {
     public void onDestroy() {
         super.onDestroy();
         Log.i(DEBUG_TAG, "Application closed... Creating service in background");
-        sensorThread.quitSafely(); /** Investigate quit safely */
-        Intent broadcast = new Intent("us.daniel.walkthewalk.PedometerRestart");
-        sendBroadcast(broadcast);
+        sensorThread.quitSafely(); /** TODO: Decide if 'quit' is sufficient */
+
+        Toast.makeText(this,
+                "Running pedometer in background...", Toast.LENGTH_SHORT).show();
+
+        Intent broadcast = new Intent("us.daniel.walkthewalk.PedometerRestart"); /** Allows service to persist when activity shutdown */
+        sendBroadcast(broadcast); /** Will allow broadcaster to send out signal to restart pedometer service */
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startID) {
         super.onStartCommand(intent, flags, startID);
-        return START_STICKY;
+        return START_STICKY; /** Sticky allows persistent service */
     }
 
     @Nullable
@@ -103,9 +117,13 @@ public class PedometerService extends Service {
         return null;
     }
 
+    /**
+     * Method allows pedometer service to send its step count to
+     * the activities that are subscribed
+     */
     private void sendMessageToActivity() {
-        Intent intent = new Intent("Pedometer");
-        intent.putExtra("steps", steps);
+        Intent intent = new Intent("PEDOMETER_STEP_UPDATE"); /** */
+        intent.putExtra("step_count", steps);
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent); /** Broadcast step count to interested components */
     }
 
@@ -186,6 +204,12 @@ public class PedometerService extends Service {
             }
         }
 
+        /**
+         * Algorithm checks for peaks and increments number steps based on
+         * peaks found... NOTE: It will not count peaks that were always
+         * above threshold, meaning the peak must go above and then below
+         * the threshold ot be counted as a step
+         */
         private void detectSteps() {
 
             boolean above = false;

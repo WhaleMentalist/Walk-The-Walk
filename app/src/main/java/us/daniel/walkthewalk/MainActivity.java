@@ -15,19 +15,21 @@ import android.widget.TextView;
 
 public class MainActivity extends AppCompatActivity {
 
+    /** Allow log debugging */
     private static final String DEBUG_TAG = "MAIN_ACTIVITY";
 
+    /** Reference to spawned service */
     private Intent pedometerService;
 
+    /** Receives broadcasts from pedometer service */
     private BroadcastReceiver pedometerReceiver = new BroadcastReceiver() {
 
         @Override
         public void onReceive(Context context, Intent intent) {
             TextView text = findViewById(R.id.step_counter);
-            text.setText(Integer.toString(intent.getIntExtra("steps", 0)));
+            text.setText(Integer.toString(intent.getIntExtra("step_count", 0))); /** Update text with received step-count */
         }
     };
-
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -38,7 +40,7 @@ public class MainActivity extends AppCompatActivity {
         startService(pedometerService);
 
         LocalBroadcastManager.getInstance(this).
-                registerReceiver(pedometerReceiver, new IntentFilter("Pedometer"));
+                registerReceiver(pedometerReceiver, new IntentFilter("PEDOMETER_STEP_UPDATE"));
     }
 
     @Override

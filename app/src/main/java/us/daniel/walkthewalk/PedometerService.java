@@ -17,10 +17,7 @@ import android.support.annotation.Nullable;
 import android.widget.Toast;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Observable;
-import java.util.Observer;
 import java.util.concurrent.ArrayBlockingQueue;
 
 /**
@@ -44,7 +41,7 @@ public class PedometerService extends Service {
     private static final int SAMPLE_SIZE = 50;
 
     /** An arbitrary threshold to detect foot step*/
-    private static final double THRESHOLD = 5.2;
+    private static final double THRESHOLD = 6.0;
 
     /** Handler thread for sensor reading*/
     private HandlerThread sensorThread;
@@ -208,7 +205,7 @@ public class PedometerService extends Service {
          * Algorithm checks for peaks and increments number steps based on
          * peaks found... NOTE: It will not count peaks that were always
          * above threshold, meaning the peak must go above and then below
-         * the threshold ot be counted as a step
+         * the threshold to be counted as a step
          */
         private void detectSteps() {
 
@@ -222,7 +219,7 @@ public class PedometerService extends Service {
                 else if(data.get(i) < THRESHOLD) {
                     if(above) {
                         Log.i(DEBUG_TAG, "Detected a step");
-                        steps += 1;
+                        steps += 1; /** Increment step count */
                         above = false; /** Reset */
                     }
                 }

@@ -38,13 +38,13 @@ public class PedometerService extends Service {
     private static final float GRAVITY = 9.807f;
 
     /** The period between sensor readings in microseconds */
-    private static final int SAMPLE_PERIOD = 20000;
+    private static final int SAMPLE_RATE = 20000;
 
     /** Amount of sensor data samples to read*/
-    private static final int SAMPLE_SIZE = 50;
+    private static final int SAMPLE_SIZE = 100;
 
     /** Threshold for when walking is started */
-    private static final float THRESHOLD = 6.1f;
+    private static final float THRESHOLD = 5.4f;
 
     /** Handler thread for sensor reading*/
     private HandlerThread accelerometerReader;
@@ -81,7 +81,7 @@ public class PedometerService extends Service {
 
         /** Handle sensor readings from other thread */
         accelerometerHandler = new Handler(accelerometerReader.getLooper());
-        sensorManager.registerListener(new AccelerometerListener(), accelerometer, SAMPLE_PERIOD, accelerometerHandler);
+        sensorManager.registerListener(new AccelerometerListener(), accelerometer, SAMPLE_RATE, accelerometerHandler);
 
         /** This will consume data that is produced by accelerometer*/
         stepDetectionTask = new AccelerometerReader();
@@ -146,7 +146,7 @@ public class PedometerService extends Service {
             try {
                 acceleration.put(mag); /** Record into buffer for evaluation later */
                 countDownLatch.countDown(); /** Bring down count down for other consumer thread*/
-                Log.i(DEBUG_TAG, "Count down: " + countDownLatch.getCount());
+                // Log.i(DEBUG_TAG, "Count down: " + countDownLatch.getCount());
             }
             catch(InterruptedException e) {
                 Log.i(DEBUG_TAG, e.getMessage());
@@ -172,7 +172,10 @@ public class PedometerService extends Service {
         private List<Float> sensorDataCopy = new ArrayList<>();
 
         /** Track state of step detection algorithm */
-        private boolean above = false;
+        private boolean aboveThreshold = false;
+
+        /** Track point in time where the last step was detected */
+        private int lastStepDetected;
 
         @Override
         public void run() {
@@ -188,10 +191,10 @@ public class PedometerService extends Service {
                 }
 
                 acceleration.drainTo(sensorDataCopy, SAMPLE_SIZE); /** Copy readings into data member */
-                Log.i(DEBUG_TAG, "Copy Size: " + sensorDataCopy.size());
-                Log.i(DEBUG_TAG, "Detecting steps");
+                // Log.i(DEBUG_TAG, "Copy Size: " + sensorDataCopy.size());
+                // Log.i(DEBUG_TAG, "Detecting steps");
                 detectSteps(); /** This can be done as accelerometer is reading in data */
-                Log.i(DEBUG_TAG, "Processing done");
+                // Log.i(DEBUG_TAG, "Processing done");
                 sensorDataCopy.clear();
             }
         }
@@ -210,17 +213,38 @@ public class PedometerService extends Service {
          * the threshold to be counted as a step
          */
         private void detectSteps() {
+
+            float currentPeriod;
+
+            lastStepDetected = -1;
+
             for(int i = 0; i < SAMPLE_SIZE; i++) {
 
                 if(sensorDataCopy.get(i) > THRESHOLD) {
-                    above = true;
+                    aboveThreshold = true;
                 }
-                else if(sensorDataCopy.get(i) < THRESHOLD) {
-                    if(above) {
-                        Log.i(DEBUG_TAG, "Detected a step");
-                        steps += 1; /** Increment step count */
-                        sendMessageToActivity(); /** Broadcast to update*/
-                        above = false;
+                else { /** Below threshold */
+                    if(aboveThreshold) { /** Detected a step */
+                        Log.i(DEBUG_TAG, "Tentative Step Detected!");
+                        aboveThreshold = false;
+
+                        if(lastStepDetected > -1) { /** If there was a last step */
+                            currentPeriod = (i - lastStepDetected) * 0.02f; /** Get the period of this step and last step */
+                            Log.i(DEBUG_TAG, "Step period: " + currentPeriod);
+
+                                if(currentPeriod > 0.12f) {
+                                lastStepDetected = i; /** Track as last step for frequency checking */
+                                steps++;
+                                sendMessageToActivity();
+                            }
+
+                        }
+                        else { /** This is the first step in sample! */
+                            lastStepDetected = i;
+                            steps++;
+                            sendMessageToActivity();
+                        }
+
                     }
                 }
             }

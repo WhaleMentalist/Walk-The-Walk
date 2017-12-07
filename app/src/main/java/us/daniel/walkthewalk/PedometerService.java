@@ -43,8 +43,8 @@ public class PedometerService extends Service {
     /** Amount of sensor data samples to read*/
     private static final int SAMPLE_SIZE = 50;
 
-    /** An arbitrary threshold to detect foot step*/
-    private static final double THRESHOLD = 6.0;
+    /** Threshold for when walking is started */
+    private static final float THRESHOLD = 6.1f;
 
     /** Handler thread for sensor reading*/
     private HandlerThread accelerometerReader;
@@ -171,6 +171,9 @@ public class PedometerService extends Service {
         /** A copy of the sensor readings */
         private List<Float> sensorDataCopy = new ArrayList<>();
 
+        /** Track state of step detection algorithm */
+        private boolean above = false;
+
         @Override
         public void run() {
 
@@ -194,7 +197,7 @@ public class PedometerService extends Service {
         }
 
         /**
-         * Stop the execution of thread form outside
+         * Stop the execution of thread from the outside
          */
         public void stop() {
             execute = false;
@@ -207,9 +210,6 @@ public class PedometerService extends Service {
          * the threshold to be counted as a step
          */
         private void detectSteps() {
-
-            boolean above = false;
-
             for(int i = 0; i < SAMPLE_SIZE; i++) {
 
                 if(sensorDataCopy.get(i) > THRESHOLD) {
@@ -220,10 +220,11 @@ public class PedometerService extends Service {
                         Log.i(DEBUG_TAG, "Detected a step");
                         steps += 1; /** Increment step count */
                         sendMessageToActivity(); /** Broadcast to update*/
-                        above = false; /** Reset */
+                        above = false;
                     }
                 }
             }
+
         }
     }
 }

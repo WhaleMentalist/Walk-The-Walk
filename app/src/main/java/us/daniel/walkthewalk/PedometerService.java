@@ -38,13 +38,13 @@ public class PedometerService extends Service {
     private static final float GRAVITY = 9.807f;
 
     /** The period between sensor readings in microseconds */
-    private static final int SAMPLE_PERIOD = 20000;
+    private static final int SAMPLE_RATE = 20000;
 
     /** Amount of sensor data samples to read*/
-    private static final int SAMPLE_SIZE = 50;
+    private static final int SAMPLE_SIZE = 100;
 
     /** Threshold for when walking is started */
-    private static final float THRESHOLD = 6.1f;
+    private static final float THRESHOLD = 5.4f;
 
     /** Handler thread for sensor reading*/
     private HandlerThread accelerometerReader;
@@ -66,7 +66,7 @@ public class PedometerService extends Service {
 
     public PedometerService() {
         super();
-        Log.i(DEBUG_TAG, "CONSTRUCTION");
+        Log.d(DEBUG_TAG, "CONSTRUCTION");
     }
 
     @Override
@@ -76,12 +76,12 @@ public class PedometerService extends Service {
         acceleration = new ArrayBlockingQueue<>(2 * SAMPLE_SIZE);
 
         /** Create thread for sensor reading */
-        accelerometerReader = new HandlerThread("ACCELEROMETER_W", Thread.MAX_PRIORITY);
+        accelerometerReader = new HandlerThread("ACCELEROMETER_R", Thread.MAX_PRIORITY);
         accelerometerReader.start();
 
         /** Handle sensor readings from other thread */
         accelerometerHandler = new Handler(accelerometerReader.getLooper());
-        sensorManager.registerListener(new AccelerometerListener(), accelerometer, SAMPLE_PERIOD, accelerometerHandler);
+        sensorManager.registerListener(new AccelerometerListener(), accelerometer, SAMPLE_RATE, accelerometerHandler);
 
         /** This will consume data that is produced by accelerometer*/
         stepDetectionTask = new AccelerometerReader();
@@ -92,7 +92,7 @@ public class PedometerService extends Service {
     public void onDestroy() {
         /** TODO: Unregister listener on sensor manager? */
         super.onDestroy();
-        Log.i(DEBUG_TAG, "Application closed... Creating service in background");
+        Log.d(DEBUG_TAG, "Application closed... Creating service in background");
 
         accelerometerReader.quit(); /** Stop reading data */
         stepDetectionTask.stop(); /** Stop detecting steps */
@@ -132,6 +132,8 @@ public class PedometerService extends Service {
      */
     private class AccelerometerListener implements SensorEventListener {
 
+        private static final String DEBUG_TAG = "ACCELEROMETER_READER";
+
         @Override
         public void onSensorChanged(SensorEvent sensorEvent) {
 
@@ -146,10 +148,10 @@ public class PedometerService extends Service {
             try {
                 acceleration.put(mag); /** Record into buffer for evaluation later */
                 countDownLatch.countDown(); /** Bring down count down for other consumer thread*/
-                Log.i(DEBUG_TAG, "Count down: " + countDownLatch.getCount());
+                Log.d(DEBUG_TAG, "Count down: " + countDownLatch.getCount());
             }
             catch(InterruptedException e) {
-                Log.i(DEBUG_TAG, e.getMessage());
+                Log.d(DEBUG_TAG, e.getMessage());
             }
         }
 
@@ -165,6 +167,8 @@ public class PedometerService extends Service {
      */
     private class AccelerometerReader implements Runnable {
 
+        private static final String DEBUG_TAG = "STEP_DETECTION";
+
         /** Determines if thread should keep running. Important during teardown */
         private volatile boolean execute = true;
 
@@ -172,7 +176,13 @@ public class PedometerService extends Service {
         private List<Float> sensorDataCopy = new ArrayList<>();
 
         /** Track state of step detection algorithm */
-        private boolean above = false;
+        private boolean aboveThreshold = false;
+
+        /** Track if we are moving */
+        private boolean moving = false;
+
+        /** Track point the number of steps taken to detect the next step*/
+        private long numberSamplesToStep;
 
         @Override
         public void run() {
@@ -184,14 +194,14 @@ public class PedometerService extends Service {
                     countDownLatch = new CountDownLatch(SAMPLE_SIZE); /** Reset count down*/
                 }
                 catch(InterruptedException e) {
-                    Log.i(DEBUG_TAG, e.getMessage());
+                    Log.d(DEBUG_TAG, e.getMessage());
                 }
 
                 acceleration.drainTo(sensorDataCopy, SAMPLE_SIZE); /** Copy readings into data member */
-                Log.i(DEBUG_TAG, "Copy Size: " + sensorDataCopy.size());
-                Log.i(DEBUG_TAG, "Detecting steps");
+                Log.d(DEBUG_TAG, "Copy Size: " + sensorDataCopy.size());
+                Log.d(DEBUG_TAG, "Detecting steps");
                 detectSteps(); /** This can be done as accelerometer is reading in data */
-                Log.i(DEBUG_TAG, "Processing done");
+                Log.d(DEBUG_TAG, "Processing done");
                 sensorDataCopy.clear();
             }
         }
@@ -210,17 +220,35 @@ public class PedometerService extends Service {
          * the threshold to be counted as a step
          */
         private void detectSteps() {
+
             for(int i = 0; i < SAMPLE_SIZE; i++) {
 
-                if(sensorDataCopy.get(i) > THRESHOLD) {
-                    above = true;
+                numberSamplesToStep++; /** Allows for the calculation of the period */
+
+                if(numberSamplesToStep * 0.02f > 2.0f) { /** We have stopped */
+                    moving = false;
                 }
-                else if(sensorDataCopy.get(i) < THRESHOLD) {
-                    if(above) {
-                        Log.i(DEBUG_TAG, "Detected a step");
-                        steps += 1; /** Increment step count */
-                        sendMessageToActivity(); /** Broadcast to update*/
-                        above = false;
+
+                if(sensorDataCopy.get(i) > THRESHOLD) {
+                    aboveThreshold = true;
+                }
+                else { /** Below threshold */
+                    if(aboveThreshold) { /** Possible step detected */
+                        aboveThreshold = false;
+
+                        if(!moving) { /** This is the first step! */
+                            numberSamplesToStep = 0;
+                            steps++;
+                            moving = true;
+                            sendMessageToActivity(); /** Broadcast update */
+                        }
+                        else { /** We are moving! Need to check period */
+                            if(numberSamplesToStep * 0.02f > 0.14f) { /** Want a certain frequency achieved */
+                                numberSamplesToStep = 0; /** Reset counter */
+                                steps++;
+                                sendMessageToActivity();
+                            }
+                        }
                     }
                 }
             }

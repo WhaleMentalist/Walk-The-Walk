@@ -2,106 +2,52 @@ package us.daniel.walkthewalk;
 
 import android.app.Service;
 import android.content.Intent;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.hardware.SensorManager;
-import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.IBinder;
 
-import android.support.v4.content.LocalBroadcastManager;
+import android.support.annotation.Nullable;
+
 import android.util.Log;
 
-import android.support.annotation.Nullable;
-import android.widget.Toast;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.CountDownLatch;
-
-import static java.lang.Thread.sleep;
 
 /**
- * Allows tracking of foot steps based on accelerometer data.
- * This will consume a lot of battery in its current form. I
- * need to implement a mechanism that allows it to conserve
- * power when stationary and to check if we are moving periodically.
+ * Service will allows the tracking of foot steps by
+ * spawning a accelerometer processing object that
+ * manages the reading and processing of sensor data.
+ * Ultimately, the service will have the ability to be ran
+ * in the background.
  */
 public class PedometerService extends Service {
 
     /** Strictly for debugging logs */
     private static final String DEBUG_TAG = "PEDOMETER_SERVICE";
 
-    /** Will be used to subtract off magnitude calculated from sensor data */
-    private static final float GRAVITY = 9.807f;
+    /** The data processor that reads and dtects footsteps from data */
+    private AccelerometerProcessing dataProcessor;
 
-    /** The period between sensor readings in microseconds */
-    private static final int SAMPLE_RATE = 20000;
-
-    /** Amount of sensor data samples to read*/
-    private static final int SAMPLE_SIZE = 100;
-
-    /** Threshold for when walking is started */
-    private static final float THRESHOLD = 5.4f;
-
-    /** Handler thread for sensor reading*/
-    private HandlerThread accelerometerReader;
-
-    /** Handler responds to sensor events */
-    private Handler accelerometerHandler;
-
-    /** Runnable that checks for steps that occur */
-    private AccelerometerReader stepDetectionTask;
-
-    /** Number of steps detected by accelerometer */
-    private int steps = 0;
-
-    /** This will queue data read from the sensor and also manage when it is read */
-    private ArrayBlockingQueue<Float> acceleration;
-
-    /** This will allow producer thread to notify the consumer thread for acceleration data */
-    private CountDownLatch countDownLatch = new CountDownLatch(SAMPLE_SIZE);
-
+    /**
+     *
+     */
     public PedometerService() {
         super();
         Log.d(DEBUG_TAG, "CONSTRUCTION");
+        dataProcessor = AccelerometerProcessing.getInstance();
     }
 
     @Override
     public void onCreate() {
-        SensorManager sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
-        Sensor accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-        acceleration = new ArrayBlockingQueue<>(2 * SAMPLE_SIZE);
-
-        /** Create thread for sensor reading */
-        accelerometerReader = new HandlerThread("ACCELEROMETER_R", Thread.MAX_PRIORITY);
-        accelerometerReader.start();
-
-        /** Handle sensor readings from other thread */
-        accelerometerHandler = new Handler(accelerometerReader.getLooper());
-        sensorManager.registerListener(new AccelerometerListener(), accelerometer, SAMPLE_RATE, accelerometerHandler);
-
-        /** This will consume data that is produced by accelerometer*/
-        stepDetectionTask = new AccelerometerReader();
-        new Thread(stepDetectionTask, "STEP_DETECTION").start();
+        Log.d(DEBUG_TAG, "Creating accelerometer data processor");
+        dataProcessor.setup(this);
     }
 
     @Override
     public void onDestroy() {
-        /** TODO: Unregister listener on sensor manager? */
         super.onDestroy();
-        Log.d(DEBUG_TAG, "Application closed... Creating service in background");
 
-        accelerometerReader.quit(); /** Stop reading data */
-        stepDetectionTask.stop(); /** Stop detecting steps */
+        dataProcessor.destroy(); /** Cleanup threads and listeners */
 
-        Toast.makeText(this,
-                "Running pedometer service in background", Toast.LENGTH_SHORT).show();
-
-        Intent broadcast = new Intent("us.daniel.walkthewalk.PedometerRestart"); /** Allows service to persist when activity shutdown */
-        sendBroadcast(broadcast); /** Will allow broadcaster to send out signal to restart pedometer service */
+        /** Allows service to persist when activity shutdown */
+        Intent broadcast = new Intent("us.daniel.walkthewalk.PedometerRestart");
+        sendBroadcast(broadcast);
     }
 
     @Override
@@ -114,146 +60,6 @@ public class PedometerService extends Service {
     @Override
     public IBinder onBind(Intent intent) {
         return null;
-    }
-
-    /**
-     * Method allows pedometer service to send its step count to
-     * the activities that are subscribed
-     */
-    private void sendMessageToActivity() {
-        Intent intent = new Intent("PEDOMETER_STEP_UPDATE"); /** */
-        intent.putExtra("step_count", steps);
-        LocalBroadcastManager.getInstance(this).sendBroadcast(intent); /** Broadcast step count to interested components */
-    }
-
-    /**
-     * Handles the accelerometer getting a new reading. This is considered the producer
-     * in the producer-consumer problem
-     */
-    private class AccelerometerListener implements SensorEventListener {
-
-        private static final String DEBUG_TAG = "ACCELEROMETER_READER";
-
-        @Override
-        public void onSensorChanged(SensorEvent sensorEvent) {
-
-            float x, y, z, mag;
-            x = sensorEvent.values[0];
-            y = sensorEvent.values[1];
-            z = sensorEvent.values[2];
-
-            /** Want to subtract off the magnitude due to gravity*/
-            mag = (float) Math.sqrt((double)(x * x + y * y + z * z)) - GRAVITY;
-
-            try {
-                acceleration.put(mag); /** Record into buffer for evaluation later */
-                countDownLatch.countDown(); /** Bring down count down for other consumer thread*/
-                Log.d(DEBUG_TAG, "Count down: " + countDownLatch.getCount());
-            }
-            catch(InterruptedException e) {
-                Log.d(DEBUG_TAG, e.getMessage());
-            }
-        }
-
-        @Override
-        public void onAccuracyChanged(Sensor sensor, int i) {
-            /** Empty for now */
-        }
-    }
-
-    /**
-     * Handles the reading the accelerometer data. Since this is in another thread
-     * this can be considered the consumer in the consumer-producer problem
-     */
-    private class AccelerometerReader implements Runnable {
-
-        private static final String DEBUG_TAG = "STEP_DETECTION";
-
-        /** Determines if thread should keep running. Important during teardown */
-        private volatile boolean execute = true;
-
-        /** A copy of the sensor readings */
-        private List<Float> sensorDataCopy = new ArrayList<>();
-
-        /** Track state of step detection algorithm */
-        private boolean aboveThreshold = false;
-
-        /** Track if we are moving */
-        private boolean moving = false;
-
-        /** Track point the number of steps taken to detect the next step*/
-        private long numberSamplesToStep;
-
-        @Override
-        public void run() {
-
-            while(execute) { /** Allow thread to be stopped externally */
-
-                try {
-                    countDownLatch.await(); /** Wait until sample size is complete */
-                    countDownLatch = new CountDownLatch(SAMPLE_SIZE); /** Reset count down*/
-                }
-                catch(InterruptedException e) {
-                    Log.d(DEBUG_TAG, e.getMessage());
-                }
-
-                acceleration.drainTo(sensorDataCopy, SAMPLE_SIZE); /** Copy readings into data member */
-                Log.d(DEBUG_TAG, "Copy Size: " + sensorDataCopy.size());
-                Log.d(DEBUG_TAG, "Detecting steps");
-                detectSteps(); /** This can be done as accelerometer is reading in data */
-                Log.d(DEBUG_TAG, "Processing done");
-                sensorDataCopy.clear();
-            }
-        }
-
-        /**
-         * Stop the execution of thread from the outside
-         */
-        public void stop() {
-            execute = false;
-        }
-
-        /**
-         * Algorithm checks for peaks and increments number steps based on
-         * peaks found... NOTE: It will not count peaks that were always
-         * above threshold, meaning the peak must go above and then below
-         * the threshold to be counted as a step
-         */
-        private void detectSteps() {
-
-            for(int i = 0; i < SAMPLE_SIZE; i++) {
-
-                numberSamplesToStep++; /** Allows for the calculation of the period */
-
-                if(numberSamplesToStep * 0.02f > 2.0f) { /** We have stopped */
-                    moving = false;
-                }
-
-                if(sensorDataCopy.get(i) > THRESHOLD) {
-                    aboveThreshold = true;
-                }
-                else { /** Below threshold */
-                    if(aboveThreshold) { /** Possible step detected */
-                        aboveThreshold = false;
-
-                        if(!moving) { /** This is the first step! */
-                            numberSamplesToStep = 0;
-                            steps++;
-                            moving = true;
-                            sendMessageToActivity(); /** Broadcast update */
-                        }
-                        else { /** We are moving! Need to check period */
-                            if(numberSamplesToStep * 0.02f > 0.14f) { /** Want a certain frequency achieved */
-                                numberSamplesToStep = 0; /** Reset counter */
-                                steps++;
-                                sendMessageToActivity();
-                            }
-                        }
-                    }
-                }
-            }
-
-        }
     }
 }
 

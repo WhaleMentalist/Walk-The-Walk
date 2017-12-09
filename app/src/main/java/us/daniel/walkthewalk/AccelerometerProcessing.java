@@ -32,7 +32,7 @@ import static android.content.Context.SENSOR_SERVICE;
  */
 public class AccelerometerProcessing extends Observable {
 
-    private static final String DEBUG_TAG = "ACCELEROMETER_PROCESSING";
+    private static final String DEBUG_TAG = "ACCELEROMETER_PROCESS";
 
     /** Will be used to subtract off magnitude calculated from sensor data */
     private static final float GRAVITY = 9.807f;
@@ -65,7 +65,7 @@ public class AccelerometerProcessing extends Observable {
     private ExecutorService stepDetection;
 
     /** This will allow producer thread to notify the consumer thread for acceleration data */
-    private CountDownLatch countDownLatch = new CountDownLatch(SAMPLE_SIZE);
+    private CountDownLatch countDownLatch;
 
     /** This will queue data read from the sensor and also manage when it is read */
     private ArrayBlockingQueue<Float> acceleration;
@@ -85,9 +85,7 @@ public class AccelerometerProcessing extends Observable {
      * Construct the necessary threads to process data and specify
      * the sample rate for sensor.
      */
-    private AccelerometerProcessing() {
-
-    }
+    private AccelerometerProcessing() {}
 
     /**
      * Method allows pedometer service to send its step count to
@@ -109,11 +107,13 @@ public class AccelerometerProcessing extends Observable {
      * @param c the pedometer service context
      */
     public void setup(Context c) {
+        Log.d(DEBUG_TAG, "Setup");
         context = c;
         sensorManager = (SensorManager) context.getSystemService(SENSOR_SERVICE);
         Sensor accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         acceleration = new ArrayBlockingQueue<>(2 * SAMPLE_SIZE);
         steps = 0;
+        countDownLatch = new CountDownLatch(SAMPLE_SIZE);
 
         /** Create thread for sensor reading */
         accelerationReading = new HandlerThread("ACCELEROMETER_R", Thread.MAX_PRIORITY);
@@ -134,6 +134,7 @@ public class AccelerometerProcessing extends Observable {
      * TODO: Save data to allow persistent data
      */
     public void destroy() {
+        Log.d(DEBUG_TAG, "Destroy");
         /** Shutdown running threads that process accelerometer data */
         accelerationReading.quitSafely();
         stepDetection.shutdown();

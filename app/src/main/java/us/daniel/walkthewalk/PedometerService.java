@@ -42,7 +42,6 @@ public class PedometerService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
-
         dataProcessor.destroy(); /** Cleanup threads and listeners */
 
         /** Allows service to persist when activity shutdown */

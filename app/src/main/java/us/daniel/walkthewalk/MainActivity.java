@@ -10,6 +10,7 @@ import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
 
@@ -23,11 +24,13 @@ public class MainActivity extends AppCompatActivity {
 
     /** Receives broadcasts from pedometer service */
     private BroadcastReceiver pedometerReceiver = new BroadcastReceiver() {
-
         @Override
         public void onReceive(Context context, Intent intent) {
+            int steps = intent.getIntExtra("step_count", 0);
             TextView text = findViewById(R.id.step_counter);
-            text.setText(Integer.toString(intent.getIntExtra("step_count", 0))); /** Update text with received step-count */
+            text.setText(Integer.toString(steps)); /** Update text with received step-count */
+            ProgressBar bar = findViewById(R.id.progress_bar);
+            bar.setProgress(steps);
         }
     };
 
